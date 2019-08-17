@@ -1,2 +1,2 @@
-# ssm_parser
+# smm_parser
 VK posts parser
