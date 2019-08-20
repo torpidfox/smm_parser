@@ -1,47 +1,47 @@
 import vk
 import re
 from nltk.stem.snowball import SnowballStemmer
-from nltk.tokenize import sent_tokenize, word_tokenize, RegexpTokenizer
+from nltk.tokenize import TweetTokenizer
 from nltk.corpus import stopwords
 import psycopg2
 
 
 def collect_posts(sess, query, start):
-	posts = []
-	res = sess.newsfeed.search(q=query, v=5.101, start_from=start)
+    posts = []
+    res = sess.newsfeed.search(q=query, v=5.101, start_from=start)
 
-	posts = [item['text'] for item in res['items'] if item['post_type'] == 'post']
-	next_from = res['next_from'] if 'next_from' in res.keys() else -1
+    posts = [item['text'] for item in res['items'] if item['post_type'] == 'post']
+    next_from = res['next_from'] if 'next_from' in res.keys() else -1
 
-	return next_from, posts
+    return next_from, posts
 
 def stem_posts(posts):
-	result = []
-	stemmer = SnowballStemmer("russian")
-	tokenizer = RegexpTokenizer(r'\w+')
-
-	for post in posts:
-		stemmed = []
+    result = []
+    stemmer = SnowballStemmer("russian")
+    tokenizer = TweetTokenizer()
+    
+    for post in posts:
+        stemmed = []
                 #TODO fix links detection and keep emojis in the result
-		post = re.sub(r'(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]\
-			{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))\
-			[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})',
-			'',
-			post) #removing links, groups references and hashtags
-		post = re.sub(r'#[a-zA-Z0-9]*|club[0-9]*', '', post)
+        post = re.sub(r'(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]\
+        {2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))\
+        [a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})',
+        '',
+        post)
+        #removing links, groups references and hashtags
+        post = re.sub(r'#[a-zA-Z0-9]*|club[0-9]*|[-.,:?;()]*', '', post)
+        print(post)
+        tokens = tokenizer.tokenize(post)
 
+        for word in tokens:
+            stemmed_word = stemmer.stem(word)
 
-		tokens = tokenizer.tokenize(post)
+            if stemmed_word not in stopwords.words('russian'):
+                stemmed.append(stemmed_word)
 
-		for word in tokens:
-			stemmed_word = stemmer.stem(word)
+        result.append(stemmed)
 
-			if stemmed_word not in stopwords.words('russian'):
-				stemmed.append(stemmed_word)
-
-		result.append(stemmed)
-
-	return result
+    return result
 
 def send_to_database(words, cursor, table, column):
     sql_exists = 'select exists (select 1 from {0} where {1} = (%s));'.format(
@@ -80,15 +80,15 @@ def send_to_database(words, cursor, table, column):
 
      
 
-token = ""  # Сервисный ключ доступа
+token = "f29bbf4ff29bbf4ff29bbf4fd4f2f7e494ff29bf29bbf4fafc3afd9af099b867d0fa067"  # Сервисный ключ доступа
 session = vk.Session(access_token=token)  # Авторизация
 vk_api = vk.API(session)
-next_from = -1
+next_from = 0
 result = []
 
 while next_from != -1:
-	next_from, posts = collect_posts(vk_api, '😄', start=next_from)
-	result += posts
+    next_from, posts = collect_posts(vk_api, '😄', start=next_from)
+    result += posts
 
 stemmed_posts = stem_posts(result)
 print(stemmed_posts)
