@@ -4,7 +4,7 @@ from nltk.stem.snowball import SnowballStemmer
 from nltk.tokenize import TweetTokenizer
 from nltk.corpus import stopwords
 import psycopg2
-
+from emoji import UNICODE_EMOJI
 
 def collect_posts(sess, query, start):
     posts = []
@@ -44,48 +44,115 @@ def stem_posts(posts):
     return result
 
 def send_to_database(words, cursor, table, column):
-    sql_exists = 'select exists (select 1 from {0} where {1} = (%s));'.format(
-            table, column
-            )
+    words_table = 'words'
+    emoji_table = 'emojis'
+    words_emojis_table = 'words_emojis'
+
+    sql_exists = 'select exists (select 1 from {0} where {1} = (%s));'
 
     sql_increment = """update {}
             set count = count + 1 where value = (%s)
-            returning count;""".format(
-            table
-            )
-    sql_add = 'insert into {}({}) values (%s) returning id;'.format(
-            table, column
-            )
+            returning count;"""
 
-    print(sql_exists)
+    sql_add = 'insert into {}({}) values (%s) returning id;'
+    
+    sql_select_id = """select id
+            from {}
+            where value = (%s);"""
 
+    sql_link_record_exists = """select we.id 
+                        FROM "words_emojis" we
+                            JOIN words ON we.words_id = words.id
+                            JOIN emojis ON we.emojis_id = emojis.id
+                        WHERE words.value = (%s)
+                            AND emojis.value = (%s);"""
+    
+    sql_create_link_record = """INSERT INTO words_emojis(words_id, emojis_id, count)
+                            SELECT words.id, emojis.id, 1
+                            FROM words, emojis
+                            WHERE words.value = (%s)
+                            AND
+                            emojis.value = (%s)
 
+                            returning id;"""
+
+    sql_update_reference_count = """update words_emojis
+            set count = count + 1 where
+            id = (%s)
+            returning count;"""
+
+    words_only = []
     for word in words:
+        is_emoji = word in UNICODE_EMOJI
+        table = emoji_table if is_emoji else words_table
+        
+        if not is_emoji:
+            words_only.append(word)
+
         try:
-            cursor.execute(sql_exists, (word,))
+            #update independent counts
+            cursor.execute(sql_exists.format(
+            table,
+            column),
+            (word,))
+
             exists = cursor.fetchone()[0]
             print(exists)
 
             if exists:
-                cursor.execute(sql_increment, (word,))
+                cursor.execute(sql_increment.format(
+                table),
+                (word,))
+
                 increment = cursor.fetchone()[0]
                 print(increment)
             else:
-                cursor.execute(sql_add, (word, ))
+                cursor.execute(sql_add.format(
+                table,
+                column),
+                (word, ))
+
                 add = cursor.fetchone()[0]
                 print(add)
+
+            #update linked counts
+            if is_emoji:
+                for linked_word in words_only:
+                    cursor.execute(sql_link_record_exists,
+                        (linked_word, word,))
+
+                    found = cursor.fetchone()
+                    print(found)
+                    
+                    if found == None:
+                        cursor.execute(sql_create_link_record,
+                            (linked_word, word,))
+
+                        record_id = cursor.fetchone()[0]
+                    else:
+                        cursor.execute(sql_update_reference_count,
+                            (found[0],))
+                        reference_count = cursor.fetchone()[0]
+                        print(reference_count)
+
+
+                        
+                    
+                
 
         except (Exception, psycopg2.DatabaseError) as error:
                     print(error)
 
      
 
-token = "f29bbf4ff29bbf4ff29bbf4fd4f2f7e494ff29bf29bbf4fafc3afd9af099b867d0fa067"  # Сервисный ключ доступа
+token =  "" # Сервисный ключ доступа
 session = vk.Session(access_token=token)  # Авторизация
 vk_api = vk.API(session)
-next_from = 0
+next_from = -1
 result = []
 
+
+#for emoji in UNICODE_EMOJI:
 while next_from != -1:
     next_from, posts = collect_posts(vk_api, '😄', start=next_from)
     result += posts
@@ -101,7 +168,7 @@ conn = psycopg2.connect(dbname='emoji_database',
 cursor = conn.cursor()
 print(cursor)
 
-send_to_database(['ноготоч'], cursor, 'words', 'value')
+send_to_database(['ноготоч', '😄'], cursor, 'words', 'value')
 
 conn.commit()
 cursor.close()
