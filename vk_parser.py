@@ -19,48 +19,59 @@ def stem_posts(posts):
     result = []
     stemmer = SnowballStemmer("russian")
     tokenizer = TweetTokenizer()
+    to_remove = ['.', ',', '"']
     
     for post in posts:
         stemmed = []
                 #TODO fix links detection and keep emojis in the result
-        post = re.sub(r'(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]\
-        {2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))\
-        [a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})',
+        post = re.sub(r'(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})',
         '',
         post)
+        post = re.sub(r"""#[a-zA-ZА-ЯЁ0-9]+""", '', post, flags=re.U)
+        post = re.sub(r"""club[0-9]*""", '', post)
+        post = re.sub(r"""id[0-9a-zA-Z]*""", '', post)
+    
         #removing links, groups references and hashtags
-        post = re.sub(r'#[a-zA-Z0-9]*|club[0-9]*|[-.,:?;()]*', '', post)
-        print(post)
+        post = re.sub(r"""[^\u00a9\u00ae\u2000-\u3300\ud83c\ud000-\udfff\ud83d\ud000-\udfff\ud83e\ud000-\udfffА-ЯЁa-zA-Z0-9!?., ]*""",
+        '', post, flags=re.U)
+        #post = re.sub(r'#[a-zA-Z0-9]*|club[0-9]*|[-.,:;()"=*/\_{}]*|@[a-zA-Z0-9]*', '', post)
         tokens = tokenizer.tokenize(post)
 
         for word in tokens:
             stemmed_word = stemmer.stem(word)
 
-            if stemmed_word not in stopwords.words('russian'):
+            if stemmed_word not in stopwords.words('russian')\
+            and stemmed_word not in to_remove\
+            and len(stemmed_word) > 1\
+            or stemmed_word in UNICODE_EMOJI:
                 stemmed.append(stemmed_word)
-
-        result.append(stemmed)
+        
+        if len(stemmed) > 1:
+            result.append(stemmed)
 
     return result
 
-def send_to_database(words, cursor, table, column):
+def send_to_database(words, cursor):
     words_table = 'words'
     emoji_table = 'emojis'
     words_emojis_table = 'words_emojis'
+    column = 'value'
 
-    sql_exists = 'select exists (select 1 from {0} where {1} = (%s));'
+    sql_exists = """SELECT EXISTS
+                        (SELECT 1 FROM {0} WHERE {1} = (%s));"""
 
-    sql_increment = """update {}
-            set count = count + 1 where value = (%s)
+    sql_increment = """UPDATE {}
+            SET count = count + 1 WHERE value = (%s)
             returning count;"""
 
-    sql_add = 'insert into {}({}) values (%s) returning id;'
+    sql_add = """INSERT INTO {}({}) VALUES (%s)
+                returning id;"""    
     
-    sql_select_id = """select id
-            from {}
-            where value = (%s);"""
+    sql_select_id = """SELECT id
+            FROM {}
+            WHERE value = (%s);"""
 
-    sql_link_record_exists = """select we.id 
+    sql_link_record_exists = """SELECT we.id 
                         FROM "words_emojis" we
                             JOIN words ON we.words_id = words.id
                             JOIN emojis ON we.emojis_id = emojis.id
@@ -97,7 +108,6 @@ def send_to_database(words, cursor, table, column):
             (word,))
 
             exists = cursor.fetchone()[0]
-            print(exists)
 
             if exists:
                 cursor.execute(sql_increment.format(
@@ -105,7 +115,6 @@ def send_to_database(words, cursor, table, column):
                 (word,))
 
                 increment = cursor.fetchone()[0]
-                print(increment)
             else:
                 cursor.execute(sql_add.format(
                 table,
@@ -113,7 +122,6 @@ def send_to_database(words, cursor, table, column):
                 (word, ))
 
                 add = cursor.fetchone()[0]
-                print(add)
 
             #update linked counts
             if is_emoji:
@@ -122,8 +130,7 @@ def send_to_database(words, cursor, table, column):
                         (linked_word, word,))
 
                     found = cursor.fetchone()
-                    print(found)
-                    
+
                     if found == None:
                         cursor.execute(sql_create_link_record,
                             (linked_word, word,))
@@ -133,12 +140,6 @@ def send_to_database(words, cursor, table, column):
                         cursor.execute(sql_update_reference_count,
                             (found[0],))
                         reference_count = cursor.fetchone()[0]
-                        print(reference_count)
-
-
-                        
-                    
-                
 
         except (Exception, psycopg2.DatabaseError) as error:
                     print(error)
@@ -148,7 +149,7 @@ def send_to_database(words, cursor, table, column):
 token =  "" # Сервисный ключ доступа
 session = vk.Session(access_token=token)  # Авторизация
 vk_api = vk.API(session)
-next_from = -1
+next_from = 0
 result = []
 
 
@@ -158,7 +159,6 @@ while next_from != -1:
     result += posts
 
 stemmed_posts = stem_posts(result)
-print(stemmed_posts)
 
 conn = psycopg2.connect(dbname='emoji_database',
         user='postgres', 
@@ -166,10 +166,10 @@ conn = psycopg2.connect(dbname='emoji_database',
         host='emoji.cqppiab1dnlz.eu-central-1.rds.amazonaws.com')
 
 cursor = conn.cursor()
-print(cursor)
 
-send_to_database(['ноготоч', '😄'], cursor, 'words', 'value')
+for post in stemmed_posts:
+    send_to_database(post, cursor)
+    conn.commit()
 
-conn.commit()
 cursor.close()
 conn.close()
