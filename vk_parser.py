@@ -94,10 +94,17 @@ def send_to_database(words, cursor):
 
     words_only = []
     for word in words:
+
         is_emoji = word in UNICODE_EMOJI
         table = emoji_table if is_emoji else words_table
         
         if not is_emoji:
+            if word.isdigit():
+                continue
+
+            if not word.isalpha():
+                continue
+
             words_only.append(word)
 
         try:
