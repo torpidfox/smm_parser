@@ -5,6 +5,7 @@ from nltk.tokenize import TweetTokenizer
 from nltk.corpus import stopwords
 import psycopg2
 from emoji import UNICODE_EMOJI
+from time import sleep
 
 def collect_posts(sess, query, start):
     posts = []
@@ -34,6 +35,7 @@ def stem_posts(posts):
         #removing links, groups references and hashtags
         post = re.sub(r"""[^\u00a9\u00ae\u2000-\u3300\ud83c\ud000-\udfff\ud83d\ud000-\udfff\ud83e\ud000-\udfffА-ЯЁa-zA-Z0-9!?., ]*""",
         '', post, flags=re.U)
+        post = post.lower()
         #post = re.sub(r'#[a-zA-Z0-9]*|club[0-9]*|[-.,:;()"=*/\_{}]*|@[a-zA-Z0-9]*', '', post)
         tokens = tokenizer.tokenize(post)
 
@@ -79,7 +81,7 @@ def send_to_database(words, cursor):
                             AND emojis.value = (%s);"""
     
     sql_create_link_record = """INSERT INTO words_emojis(words_id, emojis_id, count)
-                            SELECT words.id, emojis.id, 1
+                            SELECT words.id, emojis.id, 0
                             FROM words, emojis
                             WHERE words.value = (%s)
                             AND
@@ -93,7 +95,8 @@ def send_to_database(words, cursor):
             returning count;"""
 
     words_only = []
-    for word in words:
+    for word in set(words):
+        
 
         is_emoji = word in UNICODE_EMOJI
         table = emoji_table if is_emoji else words_table
@@ -148,35 +151,39 @@ def send_to_database(words, cursor):
                             (found[0],))
                         reference_count = cursor.fetchone()[0]
 
-        except (Exception, psycopg2.DatabaseError) as error:
+        except Exception as error:
                     print(error)
 
      
 
-token =  "" # Сервисный ключ доступа
+token =  "f29bbf4ff29bbf4ff29bbf4fd4f2f7e494ff29bf29bbf4fafc3afd9af099b867d0fa067" # Сервисный ключ доступа
 session = vk.Session(access_token=token)  # Авторизация
 vk_api = vk.API(session)
-next_from = 0
-result = []
-
-
-#for emoji in UNICODE_EMOJI:
-while next_from != -1:
-    next_from, posts = collect_posts(vk_api, '😄', start=next_from)
-    result += posts
-
-stemmed_posts = stem_posts(result)
-
 conn = psycopg2.connect(dbname='emoji_database',
-        user='postgres', 
-        password='',
-        host='emoji.cqppiab1dnlz.eu-central-1.rds.amazonaws.com')
-
+            user='postgres', 
+            password='',
+            host='emoji.cqppiab1dnlz.eu-central-1.rds.amazonaws.com')
 cursor = conn.cursor()
 
-for post in stemmed_posts:
-    send_to_database(post, cursor)
-    conn.commit()
+for emoji in UNICODE_EMOJI:
+    result = []
+    next_from = 0
+    print("starting fetching for the next emoji...")
+    while next_from != -1:
+        next_from, posts = collect_posts(vk_api, emoji, start=next_from)
+        result += posts
+    print("sleep...")
+    
+    stemmed_posts = stem_posts(result)
+    print("stemmed")
+
+    for post in stemmed_posts:
+        send_to_database(post, cursor)
+        conn.commit()
+        
+    print("commited")
+    sleep(100)
+
 
 cursor.close()
 conn.close()
